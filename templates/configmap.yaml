@@ -1,0 +1,134 @@
+{{/* ===================== FORMATO ANTIGO: lista em .Values.configmap ===================== */}}
+{{- if .Values.configmap }}
+  {{- range $cm := .Values.configmap }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "cm-%s" $cm.name }}
+  namespace: {{ default $.Release.Namespace $cm.namespace }}
+  {{- with $cm.labels }}
+  labels:
+    {{- range $k, $v := . }}
+    {{ $k }}: {{ $v | quote }}
+    {{- end }}
+  {{- end }}
+  {{- with $cm.annotations }}
+  annotations:
+    {{- range $k, $v := . }}
+    {{ $k }}: {{ $v | quote }}
+    {{- end }}
+  {{- end }}
+{{- if hasKey $cm "immutable" }}
+immutable: {{ $cm.immutable | default false }}
+{{- end }}
+
+{{/* --------------------- DATA (de .data + .literals + .files) --------------------- */}}
+{{- if or $cm.data $cm.literals $cm.files }}
+data:
+  {{- with $cm.data }}
+  {{- range $k, $v := . }}
+  {{ $k }}: |-
+{{ $v | indent 4 }}
+  {{- end }}
+  {{- end }}
+  {{- with $cm.literals }}
+  {{- range $k, $v := . }}
+  {{ $k }}: {{ $v | quote }}
+  {{- end }}
+  {{- end }}
+  {{- with $cm.files }}
+  {{- range $k, $path := . }}
+  {{- $content := $.Files.Get $path | default "" }}
+  {{ $k }}: |-
+{{ $content | indent 4 }}
+  {{- end }}
+  {{- end }}
+{{- end }}
+
+{{/* ------------------ BINARYDATA (de .binaryData + .binaryFiles) ------------------ */}}
+{{- if or $cm.binaryData $cm.binaryFiles }}
+binaryData:
+  {{- with $cm.binaryData }}
+  {{- range $k, $v := . }}
+  {{- /* Normaliza CR/LF e mantém inline (chave: "valor") */ -}}
+  {{- $val := (toString $v) | replace "\r" "" | replace "\n" "" | trim -}}
+  {{ $k }}: {{ $val | quote }}
+  {{- end }}
+  {{- end }}
+  {{- with $cm.binaryFiles }}
+  {{- range $k, $path := . }}
+  {{ $k }}: {{ ($.Files.GetBytes $path | b64enc) | quote }}
+  {{- end }}
+  {{- end }}
+{{- end }}
+---
+  {{- end }}
+{{- end }}
+
+{{/* ===================== FORMATO NOVO: mapa em .Values.configmaps ===================== */}}
+{{- if .Values.configmaps }}
+  {{- range $name, $cm := .Values.configmaps }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "cm-%s" $name }}
+  namespace: {{ default $.Release.Namespace $cm.namespace }}
+  {{- with $cm.labels }}
+  labels:
+    {{- range $k, $v := . }}
+    {{ $k }}: {{ $v | quote }}
+    {{- end }}
+  {{- end }}
+  {{- with $cm.annotations }}
+  annotations:
+    {{- range $k, $v := . }}
+    {{ $k }}: {{ $v | quote }}
+    {{- end }}
+  {{- end }}
+{{- if hasKey $cm "immutable" }}
+immutable: {{ $cm.immutable | default false }}
+{{- end }}
+
+{{/* --------------------- DATA (de .data + .literals + .files) --------------------- */}}
+{{- if or $cm.data $cm.literals $cm.files }}
+data:
+  {{- with $cm.data }}
+  {{- range $k, $v := . }}
+  {{ $k }}: |-
+{{ $v | indent 4 }}
+  {{- end }}
+  {{- end }}
+  {{- with $cm.literals }}
+  {{- range $k, $v := . }}
+  {{ $k }}: {{ $v | quote }}
+  {{- end }}
+  {{- end }}
+  {{- with $cm.files }}
+  {{- range $k, $path := . }}
+  {{- $content := $.Files.Get $path | default "" }}
+  {{ $k }}: |-
+{{ $content | indent 4 }}
+  {{- end }}
+  {{- end }}
+{{- end }}
+
+{{/* ------------------ BINARYDATA (de .binaryData + .binaryFiles) ------------------ */}}
+{{- if or (hasKey $cm "binaryData") (hasKey $cm "binaryFiles") }}
+binaryData:
+  {{- with $cm.binaryData }}
+  {{- range $k, $v := . }}
+  # valor já vem em base64 do values; não quebre em linhas
+  {{ $k }}: {{ (toString $v | replace "\r" "" | replace "\n" "" | trim) | quote }}
+  {{- end }}
+  {{- end }}
+
+  {{- with $cm.binaryFiles }}
+  {{- range $k, $path := . }}
+  # lê bytes do chart e codifica em base64, sem wrap
+  {{ $k }}: {{ ($.Files.GetBytes $path | b64enc) | quote }}
+  {{- end }}
+  {{- end }}
+{{- end }}
+---
+  {{- end }}
+{{- end }}

@@ -1,0 +1,393 @@
+{{- if .Values.deployment }}
+
+{{- $app := .Values.app }}
+{{- $component := .Values.component }}
+{{- $version := "" }}
+
+{{- $namesa := printf "sa-%s" $app }}
+{{- $containers := (.Values.deployment.containers | default list) -}}
+{{- if gt (len $containers) 0 }}
+  {{- $ports := ((index $containers 0).ports | default list) -}}
+  {{- $pname := "" -}}
+
+  {{- /* ports pode ser lista (caso comum) ou mapa — tratamos os dois */ -}}
+  {{- if (kindIs "slice" $ports) }}
+    {{- if gt (len $ports) 0 }}
+      {{- $pname = ((index $ports 0).name | default "") -}}
+    {{- end }}
+  {{- else }}
+    {{- $pname = (index $ports "name" | default "") -}}
+  {{- end }}
+
+  {{- if $pname }}
+    {{- $namesa = printf "sa-%s-%s" $app $pname -}}
+  {{- else }}
+    {{- $namesa = printf "sa-%s" $app -}}
+  {{- end }}
+{{- end }}
+
+{{- $namesa = $namesa | trunc 63 | trimSuffix "-" }}
+
+# Buscar a versão correspondente no .Values.versions
+{{- if .Values.version }}
+  {{- $version = .Values.version }}
+{{- else if and $app .Values.versions }}
+  {{- $version = index .Values.versions $app }}
+{{- end }}
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ printf "de-%s" $app }}
+  labels:
+    app: {{ $app }}
+    component: {{ $component }}
+    {{- if .Values.deployment.stack }}
+    stack: {{ .Values.deployment.stack }}
+    {{- end }}
+  annotations:
+    version: {{ $version | quote }}
+    {{- if .Values.deployment.annotations }}
+    {{- if kindIs "slice" .Values.deployment.annotations }}
+      {{- range .Values.deployment.annotations }}
+        {{- range $key, $value := . }}
+    {{ $key }}: {{ $value | quote }}
+        {{- end }}
+      {{- end }}
+    {{- else }}
+      {{- range $key, $value := .Values.deployment.annotations }}
+    {{ $key }}: {{ $value | quote }}
+      {{- end }}
+    {{- end }}
+    {{- end }}
+spec:
+  replicas: {{ .Values.deployment.replicas }}
+  {{- if .Values.deployment.strategy }}
+  strategy:
+    type: {{ .Values.deployment.strategy.type | default "RollingUpdate" }}
+    {{- if and (eq .Values.deployment.strategy.type "RollingUpdate") .Values.deployment.strategy.rollingUpdate }}
+    rollingUpdate:
+      {{- if .Values.deployment.strategy.rollingUpdate.maxSurge }}
+      maxSurge: {{ .Values.deployment.strategy.rollingUpdate.maxSurge }}
+      {{- end }}
+      {{- if .Values.deployment.strategy.rollingUpdate.maxUnavailable }}
+      maxUnavailable: {{ .Values.deployment.strategy.rollingUpdate.maxUnavailable }}
+      {{- end }}
+    {{- end }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app: {{ $app }}
+      component: {{ $component }}
+      {{- if .Values.deployment.stack }}
+      stack: {{ .Values.deployment.stack }}
+      {{- end }}
+  revisionHistoryLimit: {{ .Values.deployment.revisionHistoryLimit | default 5 }}
+  template:
+    metadata:
+      labels:
+        app: {{ $app }}
+        component: {{ $component }}
+        {{- if .Values.deployment.stack }}
+        stack: {{ .Values.deployment.stack }}
+        {{- end }}
+        {{- if .Values.deployment.lbtype }}
+        lbtype: {{ .Values.deployment.lbtype | default "internal" }}
+        {{- end }}
+      annotations:
+        version: {{ $version | quote }}
+        sendlogs: {{ .Values.deployment.sendlogs | default "false" | quote }}
+    spec:
+      serviceAccountName: {{ $namesa }}
+
+      {{- if .Values.deployment.initContainers }}
+      initContainers:
+        {{- range .Values.deployment.initContainers }}
+        - name: {{ .name }}
+          image: {{ .image }}
+          {{- if .command }}
+          command:
+            {{- toYaml .command | nindent 12 }}
+          {{- end }}
+          {{- if .args }}
+          args:
+            {{- toYaml .args | nindent 12 }}
+          {{- end }}
+          {{- if .env }}
+          env:
+            {{- range .env }}
+            - name: {{ .name }}
+              {{- if .valueFrom }}
+              valueFrom:
+                {{- if .valueFrom.secretKeyRef }}
+                secretKeyRef:
+                  name: {{ .valueFrom.secretKeyRef.name }}
+                  key: {{ .valueFrom.secretKeyRef.key }}
+                {{- else if .valueFrom.fieldRef }}
+                fieldRef:
+                  fieldPath: {{ .valueFrom.fieldRef.fieldPath | quote }}
+                {{- end }}
+              {{- else }}
+              value: {{ .value | quote }}
+              {{- end }}
+            {{- end }}
+          {{- end }}
+          {{- if .volumeMounts }}
+          volumeMounts:
+            {{- range .volumeMounts }}
+            - name: {{ .name }}
+              mountPath: {{ .mountPath | quote }}
+              {{- if .subPath }}
+              subPath: {{ .subPath | quote }}
+              {{- end }}
+              {{- if .readOnly }}
+              readOnly: {{ .readOnly }}
+              {{- end }}
+            {{- end }}
+          {{- end }}
+        {{- end }}
+      {{- end }}
+
+      {{- if or .Values.deployment.affinity .Values.deployment.podAntiAffinity }}
+      affinity:
+        {{- if .Values.deployment.affinity }}
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  {{- range .Values.deployment.affinity }}
+                    {{- range $key, $value := . }}
+                  - key: {{ $key }}
+                    operator: In
+                    values:
+                      - {{ $value }}
+                    {{- end }}
+                  {{- end }}
+        {{- end }}
+
+        {{- if .Values.deployment.podAntiAffinity }}
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: {{ .Values.deployment.podAntiAffinity.app | quote }}
+              topologyKey: {{ default "kubernetes.io/hostname" .Values.deployment.podAntiAffinity.topologyKey | quote }}
+        {{- end }}
+      {{- end }}
+
+
+      {{- if .Values.deployment.hostAliases }}
+      hostAliases:
+      {{- range .Values.deployment.hostAliases }}
+        - ip: {{ .ip | quote }}
+          hostnames:
+          {{- range .hostnames }}
+          - {{ . | quote }}
+          {{- end }}
+      {{- end }}
+      {{- end }}
+      imagePullSecrets:
+        {{- range .Values.deployment.imagePullSecrets }}
+        - name: {{ .name }}
+        {{- end }}
+      containers:
+        {{- range .Values.deployment.containers }}
+        - name: {{ .name }}
+          {{- if .securityContext }}
+          securityContext:
+            {{- toYaml .securityContext | nindent 12 }}
+          {{- end }}
+          {{- if .fixedNameImage }}
+          image: {{ .image }}
+          {{- else }}
+          image: {{ printf "%s%s:%s" .image .name $version }}
+          {{- end }}
+          imagePullPolicy: IfNotPresent
+          {{- if .command }}
+          command:
+            {{- range .command }}
+            - {{ . | quote }}
+            {{- end }}
+            {{- toYaml .command | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: {{ printf "%s-%s" (toString .ports.number) .ports.name | quote }}
+              containerPort: {{ .ports.number | default 80 }}
+
+          {{- if .envFrom }}
+          envFrom:
+            {{- range .envFrom }}
+            - {{- if .configMapRef }}
+                configMapRef:
+                  name: {{ .configMapRef.name }}
+              {{- else if .secretRef }}
+                secretRef:
+                  name: {{ .secretRef.name }}
+              {{- end }}
+            {{- end }}
+          {{- end }}
+
+          {{- if .env }}
+          env:
+            {{- range .env }}
+            - name: {{ .name }}
+              {{- if .valueFrom }}
+              valueFrom:
+                {{- if .valueFrom.secretKeyRef }}
+                secretKeyRef:
+                  name: {{ .valueFrom.secretKeyRef.name }}
+                  key: {{ .valueFrom.secretKeyRef.key }}
+                {{- else if .valueFrom.fieldRef }}
+                fieldRef:
+                  fieldPath: {{ .valueFrom.fieldRef.fieldPath | quote }}
+                {{- end }}
+              {{- else }}
+              value: {{ .value | quote }}
+              {{- end }}
+            {{- end }}
+          {{- end }}
+
+          {{- if .startupProbe }}
+          startupProbe:
+            {{- if .startupProbe.httpGet }}
+            httpGet:
+              path: {{ .startupProbe.httpGet.path }}
+              port: {{ .startupProbe.httpGet.port }}
+              {{- if .startupProbe.httpGet.scheme }}
+              scheme: {{ .startupProbe.httpGet.scheme }}
+              {{- end }}
+            {{- end }}
+            {{- if .startupProbe.exec }}
+            exec:
+              command:
+                {{- range .startupProbe.exec.command }}
+                - {{ . }}
+                {{- end }}
+            {{- end }}
+            {{- if .startupProbe.tcpSocket }}
+            tcpSocket:
+              port: {{ .startupProbe.tcpSocket.port }}
+            {{- end }}
+            initialDelaySeconds: {{ .startupProbe.initialDelaySeconds | default 10 }}
+            periodSeconds: {{ .startupProbe.periodSeconds | default 10 }}
+            timeoutSeconds: {{ .startupProbe.timeoutSeconds | default 1 }}
+            failureThreshold: {{ .startupProbe.failureThreshold | default 3 }}
+            successThreshold: {{ .startupProbe.successThreshold | default 1 }}
+          {{- end }}
+
+          {{- if .livenessProbe }}
+          livenessProbe:
+            {{- if .livenessProbe.httpGet }}
+            httpGet:
+              path: {{ .livenessProbe.httpGet.path }}
+              port: {{ .livenessProbe.httpGet.port }}
+              {{- if .livenessProbe.httpGet.scheme }}
+              scheme: {{ .livenessProbe.httpGet.scheme }}
+              {{- end }}
+            {{- end }}
+            {{- if .livenessProbe.exec }}
+            exec:
+              command:
+                {{- range .livenessProbe.exec.command }}
+                - {{ . }}
+                {{- end }}
+            {{- end }}
+            {{- if .livenessProbe.tcpSocket }}
+            tcpSocket:
+              port: {{ .livenessProbe.tcpSocket.port }}
+            {{- end }}
+            initialDelaySeconds: {{ .livenessProbe.initialDelaySeconds | default 10 }}
+            periodSeconds: {{ .livenessProbe.periodSeconds | default 10 }}
+            timeoutSeconds: {{ .livenessProbe.timeoutSeconds | default 1 }}
+            failureThreshold: {{ .livenessProbe.failureThreshold | default 3 }}
+            successThreshold: {{ .livenessProbe.successThreshold | default 1 }}
+          {{- end }}
+
+          {{- if .readinessProbe }}
+          readinessProbe:
+            {{- if .readinessProbe.httpGet }}
+            httpGet:
+              path: {{ .readinessProbe.httpGet.path }}
+              port: {{ .readinessProbe.httpGet.port }}
+              {{- if .readinessProbe.httpGet.scheme }}
+              scheme: {{ .readinessProbe.httpGet.scheme }}
+              {{- end }}
+            {{- end }}
+            {{- if .readinessProbe.exec }}
+            exec:
+              command:
+                {{- range .readinessProbe.exec.command }}
+                - {{ . }}
+                {{- end }}
+            {{- end }}
+            {{- if .readinessProbe.tcpSocket }}
+            tcpSocket:
+              port: {{ .readinessProbe.tcpSocket.port }}
+            {{- end }}
+            initialDelaySeconds: {{ .readinessProbe.initialDelaySeconds | default 5 }}
+            periodSeconds: {{ .readinessProbe.periodSeconds | default 5 }}
+            timeoutSeconds: {{ .readinessProbe.timeoutSeconds | default 1 }}
+            failureThreshold: {{ .readinessProbe.failureThreshold | default 3 }}
+            successThreshold: {{ .readinessProbe.successThreshold | default 1 }}
+          {{- end }}
+
+          {{- if .resources }}
+          resources:
+            {{- if .resources.requests }}
+            requests:
+              memory: {{ .resources.requests.memory | default "128Mi" }}
+              cpu: {{ .resources.requests.cpu | default "100m" }}
+            {{- end }}
+            {{- if .resources.limits }}
+            limits:
+              memory: {{ .resources.limits.memory | default "512Mi" }}
+              cpu: {{ .resources.limits.cpu | default "500m" }}
+            {{- end }}
+          {{- end }}
+
+          {{- if .volumeMounts }}
+          volumeMounts:
+            {{- range .volumeMounts }}
+            - name: {{ .name }}
+              mountPath: {{ .mountPath }}
+              {{- if .subPath }}
+              subPath: {{ .subPath }}
+              {{- end }}
+              {{- if .readOnly }}
+              readOnly: {{ .readOnly }}
+              {{- end }}
+            {{- end }}
+          {{- end }}
+        {{- end }}
+
+      {{- if and .Values.deployment .Values.deployment.volumes }}
+      volumes:
+        {{- range .Values.deployment.volumes }}
+        - name: {{ .name }}
+          {{- if .persistentVolumeClaim }}
+          persistentVolumeClaim:
+            claimName: {{ .persistentVolumeClaim.claimName }}
+          {{- end }}
+          {{- if .secret }}
+          secret:
+            secretName: {{ .secret.secretName }}
+          {{- end }}
+          {{- if .configMap }}
+          configMap:
+            name: {{ .configMap.name }}
+            {{- if .configMap.defaultMode }}
+            defaultMode: {{ printf "%04o" (int .configMap.defaultMode) }}
+            {{- end }}
+            {{- if .configMap.items }}
+            items:
+              {{- toYaml .configMap.items | nindent 14 }}
+            {{- end }}
+          {{- end }}
+          {{- if .emptyDir }}
+          emptyDir: {}
+          {{- end }}
+        {{- end }}
+      {{- end }}
+
+---
+{{- end }}

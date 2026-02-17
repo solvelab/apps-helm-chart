@@ -1,0 +1,104 @@
+{{- if .Values.rbac }}
+{{- $app := .Values.app }}
+{{- $namespace := .Values.rbac.namespace | default "default" }}
+
+
+# -----------------------------
+# Roles
+# -----------------------------
+{{- if .Values.rbac.roles }}
+{{- range .Values.rbac.roles }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ .name }}
+  namespace: {{ $namespace }}
+  labels:
+    app: {{ $app }}
+rules:
+  {{- range .rules }}
+  - apiGroups: {{ toYaml .apiGroups | nindent 6 }}
+    resources: {{ toYaml .resources | nindent 6 }}
+    {{- if .resourceNames }}
+    resourceNames: {{ toYaml .resourceNames | nindent 6 }}
+    {{- end }}
+    verbs: {{ toYaml .verbs | nindent 6 }}
+  {{- end }}
+---
+{{- end }}
+{{- end }}
+
+
+# -----------------------------
+# RoleBindings
+# -----------------------------
+{{- if .Values.rbac.roleBindings }}
+{{- range .Values.rbac.roleBindings }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ .name }}
+  namespace: {{ $namespace }}
+subjects:
+  {{- toYaml .subjects | nindent 2 }}
+roleRef:
+  {{- if kindIs "string" .roleRef }}
+  kind: Role
+  name: {{ .roleRef }}
+  apiGroup: rbac.authorization.k8s.io
+  {{- else }}
+  {{- toYaml .roleRef | nindent 2 }}
+  {{- end }}
+---
+{{- end }}
+{{- end }}
+
+
+# -----------------------------
+# ClusterRole
+# -----------------------------
+{{- if .Values.rbac.clusterRole }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Values.rbac.clusterRole.name | default $app }}
+  labels:
+    app: {{ $app }}
+rules:
+  {{- range .Values.rbac.clusterRole.rules }}
+  - apiGroups: {{ toYaml .apiGroups | nindent 6 }}
+    resources: {{ toYaml .resources | nindent 6 }}
+    {{- if .resourceNames }}
+    resourceNames: {{ toYaml .resourceNames | nindent 6 }}
+    {{- end }}
+    verbs: {{ toYaml .verbs | nindent 6 }}
+  {{- end }}
+
+---
+{{- end }}
+
+
+{{- if .Values.rbac.clusterRoleBinding }}
+# -----------------------------
+# ClusterRoleBinding
+# -----------------------------
+{{- range .Values.rbac.clusterRoleBinding }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .name | default $app }}
+subjects:
+  {{- toYaml .subjects | nindent 2 }}
+roleRef:
+  {{- if kindIs "string" .roleRef }}
+  kind: ClusterRole
+  name: {{ .roleRef }}
+  apiGroup: rbac.authorization.k8s.io
+  {{- else }}
+  {{- toYaml .roleRef | nindent 2 }}
+  {{- end }}
+---
+{{- end }}
+{{- end }}
+
+{{- end }}

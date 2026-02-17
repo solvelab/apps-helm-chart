@@ -1,0 +1,31 @@
+# Pasta de testes
+test/
+
+# Artefatos de empacotamento Helm
+*.tgz
+charts/*.tgz
+
+# Arquivos temporários
+*.tmp
+*.temp
+*.swp
+*~
+
+# Arquivos do sistema operacional
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDEs e editores
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# Variáveis de ambiente e secrets locais
+.env
+.env.local
+*.secret.yaml
+
+# Logs
+*.log

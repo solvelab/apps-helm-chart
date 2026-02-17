@@ -1,0 +1,349 @@
+{{- if .Values.daemonset }}
+
+{{- $app := .Values.app }}
+{{- $component := .Values.component }}
+{{- $version := "" }}
+
+{{- if .Values.version }}
+  {{- $version = .Values.version }}
+{{- else if and $app .Values.versions }}
+  {{- $version = index .Values.versions $app }}
+{{- end }}
+
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ printf "ds-%s" $app }}
+  labels:
+    app: {{ $app }}
+    component: {{ $component }}
+    {{- if .Values.daemonset.stack }}
+    stack: {{ .Values.daemonset.stack }}
+    {{- end }}
+  annotations:
+    version: {{ $version | quote }}
+    {{- if .Values.daemonset.annotations }}
+    {{- if kindIs "slice" .Values.daemonset.annotations }}
+      {{- range .Values.daemonset.annotations }}
+        {{- range $key, $value := . }}
+    {{ $key }}: {{ $value | quote }}
+        {{- end }}
+      {{- end }}
+    {{- else }}
+      {{- range $key, $value := .Values.daemonset.annotations }}
+    {{ $key }}: {{ $value | quote }}
+      {{- end }}
+    {{- end }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      app: {{ $app }}
+      component: {{ $component }}
+      {{- if .Values.daemonset.stack }}
+      stack: {{ .Values.daemonset.stack }}
+      {{- end }}
+  revisionHistoryLimit: {{ .Values.daemonset.revisionHistoryLimit | default 5 }}
+  template:
+    metadata:
+      labels:
+        app: {{ $app }}
+        component: {{ $component }}
+        {{- if .Values.daemonset.stack }}
+        stack: {{ .Values.daemonset.stack }}
+        {{- end }}
+        {{- if .Values.daemonset.lbtype }}
+        lbtype: {{ .Values.daemonset.lbtype | default "internal" }}
+        {{- end }}
+      annotations:
+        version: {{ $version | quote }}
+        sendlogs: {{ .Values.daemonset.sendlogs | default "false" | quote }}
+    spec:
+      serviceAccountName: {{ printf "sa-%s" $app | default "default-sa" }}
+      {{- if .Values.daemonset.hostNetwork }}
+      hostNetwork: {{ .Values.daemonset.hostNetwork }}
+      {{- end }}
+      {{- if .Values.daemonset.dnsPolicy }}
+      dnsPolicy: {{ .Values.daemonset.dnsPolicy }}
+      {{- end }}
+
+      {{- if .Values.daemonset.initContainers }}
+      initContainers:
+        {{- range .Values.daemonset.initContainers }}
+        - name: {{ .name }}
+          image: {{ .image }}
+          {{- if .command }}
+          command:
+            {{- range .command }}
+            - {{ . | quote }}
+            {{- end }}
+          {{- end }}
+          {{- if .args }}
+          args:
+            {{- range .args }}
+            - {{ . | quote }}
+            {{- end }}
+          {{- end }}
+          {{- if .volumeMounts }}
+          volumeMounts:
+            {{- range .volumeMounts }}
+            - name: {{ .name }}
+              mountPath: {{ .mountPath | quote }}
+              {{- if .subPath }}
+              subPath: {{ .subPath | quote }}
+              {{- end }}
+              {{- if .readOnly }}
+              readOnly: {{ .readOnly }}
+              {{- end }}
+            {{- end }}
+          {{- end }}
+        {{- end }}
+      {{- end }}
+
+      {{- if .Values.daemonset.affinity }}
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  {{- range .Values.daemonset.affinity }}
+                    {{- range $key, $value := . }}
+                  - key: {{ $key }}
+                    operator: In
+                    values:
+                      - {{ $value }}
+                    {{- end }}
+                  {{- end }}
+      {{- end }}
+
+      {{- if .Values.daemonset.hostAliases }}
+      hostAliases:
+      {{- range .Values.daemonset.hostAliases }}
+        - ip: {{ .ip | quote }}
+          hostnames:
+          {{- range .hostnames }}
+          - {{ . | quote }}
+          {{- end }}
+      {{- end }}
+      {{- end }}
+
+      {{- if .Values.daemonset.imagePullSecrets }}
+      imagePullSecrets:
+        {{- range .Values.daemonset.imagePullSecrets }}
+        - name: {{ .name }}
+        {{- end }}
+      {{- end }}
+
+      containers:
+        {{- range .Values.daemonset.containers }}
+        - name: {{ .name }}
+          {{ if .securityContext }}
+          securityContext:
+            {{- if .securityContext.runAsUser }}
+            runAsUser: {{ .securityContext.runAsUser }}
+            {{- end }}
+            {{- if .securityContext.runAsGroup }}
+            runAsGroup: {{ .securityContext.runAsGroup }}
+            {{- end }}
+            {{- if .securityContext.privileged }}
+            privileged: {{ .securityContext.privileged | quote }}
+            {{- end }}
+          {{- end }}          
+          {{- if .fixedNameImage }}
+          image: {{ .image }}
+          {{- else }}
+          image: {{ printf "%s%s:%s" .image .name $version }}
+          {{- end }}
+          imagePullPolicy: IfNotPresent
+          {{- if .ports }}
+          ports:
+            {{- range .ports }}
+            - name: {{ printf "%s-%s" (toString .number) .name | quote }}
+              containerPort: {{ .number | default 80 }}
+              {{- if .hostPort }}
+              hostPort: {{ .hostPort }}
+              {{- end }}
+              {{- if .protocol }}
+              protocol: {{ .protocol | quote }}
+              {{- end }}
+            {{- end }}
+          {{- end }}
+
+          {{- if .envFrom }}
+          envFrom:
+            {{- range .envFrom }}
+            - {{- if .configMapRef }}
+                configMapRef:
+                  name: {{ .configMapRef.name }}
+              {{- else if .secretRef }}
+                secretRef:
+                  name: {{ .secretRef.name }}
+              {{- end }}
+            {{- end }}
+          {{- end }}
+
+          {{- if .env }}
+          env:
+            {{- range .env }}
+            - name: {{ .name }}
+              {{- if .valueFrom }}
+              valueFrom:
+                {{- if .valueFrom.secretKeyRef }}
+                secretKeyRef:
+                  name: {{ .valueFrom.secretKeyRef.name }}
+                  key: {{ .valueFrom.secretKeyRef.key }}
+                {{- else if .valueFrom.fieldRef }}
+                fieldRef:
+                  fieldPath: {{ .valueFrom.fieldRef.fieldPath | quote }}
+                {{- end }}
+              {{- else }}
+              value: {{ .value | quote }}
+              {{- end }}
+            {{- end }}
+          {{- end }}
+
+          {{- if .livenessProbe }}
+          livenessProbe:
+            {{- if .livenessProbe.httpGet }}
+            httpGet:
+              path: {{ .livenessProbe.httpGet.path }}
+              port: {{ .livenessProbe.httpGet.port }}
+              {{- if .livenessProbe.httpGet.scheme }}
+              scheme: {{ .livenessProbe.httpGet.scheme }}
+              {{- end }}
+            {{- end }}
+            {{- if .livenessProbe.exec }}
+            exec:
+              command:
+                {{- range .livenessProbe.exec.command }}
+                - {{ . }}
+                {{- end }}
+            {{- end }}
+            {{- if .livenessProbe.tcpSocket }}
+            tcpSocket:
+              port: {{ .livenessProbe.tcpSocket.port }}
+            {{- end }}
+            initialDelaySeconds: {{ .livenessProbe.initialDelaySeconds | default 10 }}
+            periodSeconds: {{ .livenessProbe.periodSeconds | default 10 }}
+            timeoutSeconds: {{ .livenessProbe.timeoutSeconds | default 1 }}
+            failureThreshold: {{ .livenessProbe.failureThreshold | default 3 }}
+            successThreshold: {{ .livenessProbe.successThreshold | default 1 }}
+          {{- end }}
+
+          {{- if .readinessProbe }}
+          readinessProbe:
+            {{- if .readinessProbe.httpGet }}
+            httpGet:
+              path: {{ .readinessProbe.httpGet.path }}
+              port: {{ .readinessProbe.httpGet.port }}
+              {{- if .readinessProbe.httpGet.scheme }}
+              scheme: {{ .readinessProbe.httpGet.scheme }}
+              {{- end }}
+            {{- end }}
+            {{- if .readinessProbe.exec }}
+            exec:
+              command:
+                {{- range .readinessProbe.exec.command }}
+                - {{ . }}
+                {{- end }}
+            {{- end }}
+            {{- if .readinessProbe.tcpSocket }}
+            tcpSocket:
+              port: {{ .readinessProbe.tcpSocket.port }}
+            {{- end }}
+            initialDelaySeconds: {{ .readinessProbe.initialDelaySeconds | default 5 }}
+            periodSeconds: {{ .readinessProbe.periodSeconds | default 5 }}
+            timeoutSeconds: {{ .readinessProbe.timeoutSeconds | default 1 }}
+            failureThreshold: {{ .readinessProbe.failureThreshold | default 3 }}
+            successThreshold: {{ .readinessProbe.successThreshold | default 1 }}
+          {{- end }}
+
+
+          {{- if .resources }}
+          resources:
+            {{- if .resources.requests }}
+            requests:
+              memory: {{ .resources.requests.memory | default "100Mi" }}
+              cpu: {{ .resources.requests.cpu | default "100m" }}
+            {{- end }}
+            {{- if .resources.limits }}
+            limits:
+              memory: {{ .resources.limits.memory | default "512Mi" }}
+              cpu: {{ .resources.limits.cpu | default "500m" }}
+            {{- end }}
+          {{- end }}
+          {{- if .volumeMounts }}
+          volumeMounts:
+            {{- range .volumeMounts }}
+            - name: {{ .name }}
+              mountPath: {{ .mountPath }}
+              {{- if .subPath }}
+              subPath: {{ .subPath }}
+              {{- end }}
+              {{- if .readOnly }}
+              readOnly: {{ .readOnly }}
+              {{- end }}
+            {{- end }}
+          {{- end }}
+        {{- end }}
+
+      {{- if .Values.daemonset.volumes }}
+      volumes:
+        {{- range .Values.daemonset.volumes }}
+        - name: {{ .name }}
+          {{- if .persistentVolumeClaim }}
+          persistentVolumeClaim:
+            claimName: {{ .persistentVolumeClaim.claimName }}
+          {{- end }}
+          {{- if .secret }}
+          secret:
+            secretName: {{ .secret.secretName }}
+            {{- if .secret.defaultMode }}
+            defaultMode: {{ .secret.defaultMode }}
+            {{- end }}
+            {{- if .secret.items }}
+            items:
+              {{- range .secret.items }}
+              - key: {{ .key }}
+                path: {{ .path }}
+                {{- if .mode }}mode: {{ .mode }}{{- end }}
+              {{- end }}
+            {{- end }}
+          {{- end }}
+          {{- if .configMap }}
+          configMap:
+            name: {{ .configMap.name }}
+            {{- if .configMap.defaultMode }}
+            defaultMode: {{ .configMap.defaultMode }}
+            {{- end }}
+            {{- if .configMap.items }}
+            items:
+              {{- range .configMap.items }}
+              - key: {{ .key }}
+                path: {{ .path }}
+                {{- if .mode }}mode: {{ .mode }}{{- end }}
+              {{- end }}
+            {{- end }}
+          {{- end }}
+          {{- if .emptyDir }}
+          emptyDir: {}
+          {{- end }}
+        {{- end }}
+      {{- end }}
+
+      {{- if .Values.daemonset.tolerations }}
+      tolerations:
+        {{- range .Values.daemonset.tolerations }}
+        - effect: {{ .effect | quote }}
+          operator: {{ .operator | quote }}
+          {{- if .key }}
+          key: {{ .key | quote }}
+          {{- end }}
+          {{- if .value }}
+          value: {{ .value | quote }}
+          {{- end }}
+        {{- end }}
+      {{- end }}      
+
+---
+{{- end }}

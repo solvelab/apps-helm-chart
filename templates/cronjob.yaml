@@ -1,0 +1,328 @@
+{{- if .Values.cronjob }}
+
+{{- $app := .Values.app }}
+{{- $component := .Values.component }}
+{{- $version := "" }}
+
+# Buscar a versão correspondente no .Values.versions
+{{- if .Values.version }}
+  {{- $version = .Values.version }}
+{{- else if and $app .Values.versions }}
+  {{- $version = index .Values.versions $app }}
+{{- end }}
+
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ printf "cj-%s" $app }}
+  labels:
+    app: {{ $app }}
+    component: {{ $component }}
+    {{- if .Values.cronjob.stack }}
+    stack: {{ .Values.cronjob.stack }}
+    {{- end }}
+  annotations:
+    version: {{ $version | quote }}
+    {{- if .Values.cronjob.annotations }}
+    {{- range $key, $value := .Values.cronjob.annotations }}
+    {{ $key }}: {{ $value | quote }}
+    {{- end }}
+    {{- end }}
+spec:
+  schedule: {{ .Values.cronjob.schedule | quote }}
+  {{- if .Values.cronjob.timeZone }}
+  timeZone: {{ .Values.cronjob.timeZone | quote }}
+  {{- end }}
+  {{- if .Values.cronjob.suspend }}
+  suspend: {{ .Values.cronjob.suspend }}
+  {{- end }}
+  {{- if .Values.cronjob.concurrencyPolicy }}
+  concurrencyPolicy: {{ .Values.cronjob.concurrencyPolicy }}
+  {{- end }}
+  {{- if .Values.cronjob.successfulJobsHistoryLimit }}
+  successfulJobsHistoryLimit: {{ .Values.cronjob.successfulJobsHistoryLimit }}
+  {{- end }}
+  {{- if .Values.cronjob.failedJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.cronjob.failedJobsHistoryLimit }}
+  {{- end }}
+  {{- if .Values.cronjob.startingDeadlineSeconds }}
+  startingDeadlineSeconds: {{ .Values.cronjob.startingDeadlineSeconds }}
+  {{- end }}
+  jobTemplate:
+    spec:
+      backoffLimit: {{ .Values.cronjob.backoffLimit | default 1 }}
+      template:
+        metadata:
+          labels:
+            app: {{ $app }}
+            component: {{ $component }}
+            {{- if .Values.cronjob.stack }}
+            stack: {{ .Values.cronjob.stack }}
+            {{- end }}
+          annotations:
+            version: {{ $version | quote }}
+            sendlogs: {{ .Values.cronjob.sendlogs | default "false" | quote }}
+        spec:
+          serviceAccountName: {{ printf "sa-%s" $app | default "default-sa" }}
+          restartPolicy: {{ .Values.cronjob.restartPolicy | default "OnFailure" }}
+          {{- if .Values.cronjob.initContainers }}
+          initContainers:
+            {{- range .Values.cronjob.initContainers }}
+            - name: {{ .name }}
+              image: {{ .image }}
+              {{- if .command }}
+              command:
+                {{- range .command }}
+                - {{ . | quote }}
+                {{- end }}
+              {{- end }}
+              {{- if .args }}
+              args:
+                {{- range .args }}
+                - {{ . | quote }}
+                {{- end }}
+              {{- end }}
+              {{- if .volumeMounts }}
+              volumeMounts:
+                {{- range .volumeMounts }}
+                - name: {{ .name }}
+                  mountPath: {{ .mountPath | quote }}
+                  {{- if .subPath }}
+                  subPath: {{ .subPath | quote }}
+                  {{- end }}
+                  {{- if .readOnly }}
+                  readOnly: {{ .readOnly }}
+                  {{- end }}
+                {{- end }}
+              {{- end }}
+            {{- end }}
+          {{- end }}
+
+          {{- if .Values.cronjob.affinity }}
+          affinity:
+            nodeAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                nodeSelectorTerms:
+                  - matchExpressions:
+                      {{- range .Values.cronjob.affinity }}
+                        {{- range $key, $value := . }}
+                      - key: {{ $key }}
+                        operator: In
+                        values:
+                          - {{ $value }}
+                        {{- end }}
+                      {{- end }}
+          {{- end }}
+
+          {{- if .Values.cronjob.hostAliases }}
+          hostAliases:
+          {{- range .Values.cronjob.hostAliases }}
+            - ip: {{ .ip | quote }}
+              hostnames:
+              {{- range .hostnames }}
+              - {{ . | quote }}
+              {{- end }}
+          {{- end }}
+          {{- end }}
+
+          imagePullSecrets:
+            {{- range .Values.cronjob.imagePullSecrets }}
+            - name: {{ .name }}
+            {{- end }}
+
+          containers:
+            {{- range .Values.cronjob.containers }}
+            - name: {{ .name }}
+              {{- if .securityContext }}
+              securityContext:
+                {{- if .securityContext.runAsUser }}
+                runAsUser: {{ .securityContext.runAsUser }}
+                {{- end }}
+                {{- if .securityContext.runAsGroup }}
+                runAsGroup: {{ .securityContext.runAsGroup }}
+                {{- end }}
+                {{- if .securityContext.privileged }}
+                privileged: {{ .securityContext.privileged | quote }}
+                {{- end }}
+              {{- end }}
+              {{- if .fixedNameImage }}
+              image: {{ .image }}
+              {{- else }}
+              image: {{ printf "%s%s:%s" .image .name $version }}
+              {{- end }}
+              imagePullPolicy: IfNotPresent
+              {{- if .ports }}
+              ports:
+                - name: {{ printf "%s-%s" (toString .ports.number) .ports.name | quote }}
+                  containerPort: {{ .ports.number | default 80 }}
+              {{- end }}
+
+              {{- if .envFrom }}
+              envFrom:
+                {{- range .envFrom }}
+                - {{- if .configMapRef }}
+                    configMapRef:
+                      name: {{ .configMapRef.name }}
+                  {{- else if .secretRef }}
+                    secretRef:
+                      name: {{ .secretRef.name }}
+                  {{- end }}
+                {{- end }}
+              {{- end }}
+
+              {{- if .env }}
+              env:
+                {{- range .env }}
+                - name: {{ .name }}
+                  {{- if .valueFrom }}
+                  valueFrom:
+                    {{- if .valueFrom.secretKeyRef }}
+                    secretKeyRef:
+                      name: {{ .valueFrom.secretKeyRef.name }}
+                      key: {{ .valueFrom.secretKeyRef.key }}
+                    {{- else if .valueFrom.fieldRef }}
+                    fieldRef:
+                      fieldPath: {{ .valueFrom.fieldRef.fieldPath | quote }}
+                    {{- end }}
+                  {{- else }}
+                  value: {{ .value | quote }}
+                  {{- end }}
+                {{- end }}
+              {{- end }}
+
+              {{- if .startupProbe }}
+              startupProbe:
+                {{- if .startupProbe.httpGet }}
+                httpGet:
+                  path: {{ .startupProbe.httpGet.path }}
+                  port: {{ .startupProbe.httpGet.port }}
+                  {{- if .startupProbe.httpGet.scheme }}
+                  scheme: {{ .startupProbe.httpGet.scheme }}
+                  {{- end }}
+                {{- end }}
+                {{- if .startupProbe.exec }}
+                exec:
+                  command:
+                    {{- range .startupProbe.exec.command }}
+                    - {{ . }}
+                    {{- end }}
+                {{- end }}
+                {{- if .startupProbe.tcpSocket }}
+                tcpSocket:
+                  port: {{ .startupProbe.tcpSocket.port }}
+                {{- end }}
+                initialDelaySeconds: {{ .startupProbe.initialDelaySeconds | default 10 }}
+                periodSeconds: {{ .startupProbe.periodSeconds | default 10 }}
+                timeoutSeconds: {{ .startupProbe.timeoutSeconds | default 1 }}
+                failureThreshold: {{ .startupProbe.failureThreshold | default 3 }}
+                successThreshold: {{ .startupProbe.successThreshold | default 1 }}
+              {{- end }}
+
+              {{- if .livenessProbe }}
+              livenessProbe:
+                {{- if .livenessProbe.httpGet }}
+                httpGet:
+                  path: {{ .livenessProbe.httpGet.path }}
+                  port: {{ .livenessProbe.httpGet.port }}
+                  {{- if .livenessProbe.httpGet.scheme }}
+                  scheme: {{ .livenessProbe.httpGet.scheme }}
+                  {{- end }}
+                {{- end }}
+                {{- if .livenessProbe.exec }}
+                exec:
+                  command:
+                    {{- range .livenessProbe.exec.command }}
+                    - {{ . }}
+                    {{- end }}
+                {{- end }}
+                {{- if .livenessProbe.tcpSocket }}
+                tcpSocket:
+                  port: {{ .livenessProbe.tcpSocket.port }}
+                {{- end }}
+                initialDelaySeconds: {{ .livenessProbe.initialDelaySeconds | default 10 }}
+                periodSeconds: {{ .livenessProbe.periodSeconds | default 10 }}
+                timeoutSeconds: {{ .livenessProbe.timeoutSeconds | default 1 }}
+                failureThreshold: {{ .livenessProbe.failureThreshold | default 3 }}
+                successThreshold: {{ .livenessProbe.successThreshold | default 1 }}
+              {{- end }}
+
+              {{- if .readinessProbe }}
+              readinessProbe:
+                {{- if .readinessProbe.httpGet }}
+                httpGet:
+                  path: {{ .readinessProbe.httpGet.path }}
+                  port: {{ .readinessProbe.httpGet.port }}
+                  {{- if .readinessProbe.httpGet.scheme }}
+                  scheme: {{ .readinessProbe.httpGet.scheme }}
+                  {{- end }}
+                {{- end }}
+                {{- if .readinessProbe.exec }}
+                exec:
+                  command:
+                    {{- range .readinessProbe.exec.command }}
+                    - {{ . }}
+                    {{- end }}
+                {{- end }}
+                {{- if .readinessProbe.tcpSocket }}
+                tcpSocket:
+                  port: {{ .readinessProbe.tcpSocket.port }}
+                {{- end }}
+                initialDelaySeconds: {{ .readinessProbe.initialDelaySeconds | default 5 }}
+                periodSeconds: {{ .readinessProbe.periodSeconds | default 5 }}
+                timeoutSeconds: {{ .readinessProbe.timeoutSeconds | default 1 }}
+                failureThreshold: {{ .readinessProbe.failureThreshold | default 3 }}
+                successThreshold: {{ .readinessProbe.successThreshold | default 1 }}
+              {{- end }}
+
+              {{- if .resources }}
+              resources:
+                {{- if .resources.requests }}
+                requests:
+                  memory: {{ .resources.requests.memory | default "128Mi" }}
+                  cpu: {{ .resources.requests.cpu | default "100m" }}
+                {{- end }}
+                {{- if .resources.limits }}
+                limits:
+                  memory: {{ .resources.limits.memory | default "512Mi" }}
+                  cpu: {{ .resources.limits.cpu | default "500m" }}
+                {{- end }}
+              {{- end }}
+
+              {{- if .volumeMounts }}
+              volumeMounts:
+                {{- range .volumeMounts }}
+                - name: {{ .name }}
+                  mountPath: {{ .mountPath }}
+                  {{- if .subPath }}
+                  subPath: {{ .subPath }}
+                  {{- end }}
+                  {{- if .readOnly }}
+                  readOnly: {{ .readOnly }}
+                  {{- end }}
+                {{- end }}
+              {{- end }}
+            {{- end }}
+
+          {{- if and .Values.cronjob .Values.cronjob.volumes }}
+          volumes:
+            {{- range .Values.cronjob.volumes }}
+            - name: {{ .name }}
+              {{- if .persistentVolumeClaim }}
+              persistentVolumeClaim:
+                claimName: {{ .persistentVolumeClaim.claimName }}
+              {{- end }}
+              {{- if .secret }}
+              secret:
+                secretName: {{ .secret.secretName }}
+              {{- end }}
+              {{- if .configMap }}
+              configMap:
+                name: {{ .configMap.name }}
+              {{- end }}
+              {{- if .emptyDir }}
+              emptyDir: {}
+              {{- end }}
+            {{- end }}
+          {{- end }}
+
+{{- end }}

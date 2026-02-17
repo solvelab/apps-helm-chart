@@ -1,0 +1,64 @@
+{{- $app := .Values.app | default "galileo" }}
+{{- $component := .Values.component | default "galileo" }}
+{{- $portNameMax := .Values.portNameMaxLen | default 15 }}
+{{- $svcNameMax := .Values.serviceNameMaxLen | default 63 }}
+
+{{- range .Values.service }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ (.name | default (printf "svc-%s" $app)) | trunc $svcNameMax | trimSuffix "-" }}
+  {{- if .namespace }}
+  namespace: {{ .namespace }}
+  {{- end }}
+  labels:
+    app: {{ $app | trunc 63 | trimSuffix "-" }}
+    component: {{ $component | trunc 63 | trimSuffix "-" }}
+spec:
+  type: {{ .type | default "ClusterIP" }}
+  {{- if .externalName }}
+  externalName: {{ .externalName }}
+  {{- end }}
+  {{- if .clusterIP }}
+  clusterIP: {{ .clusterIP }}
+  {{- end }}
+  {{- if not .noSelector }}
+  selector:
+    app: {{ $app | trunc 63 | trimSuffix "-" }}
+    component: {{ $component | trunc 63 | trimSuffix "-" }}
+  {{- end }}
+  {{- if .ports }}
+  ports:
+    {{- range .ports }}
+    - name: {{ (.name | default (printf "%s-tcp" $app)) | trunc $portNameMax | trimSuffix "-" }}
+      port: {{ .port | default 80 }}
+      targetPort: {{ .targetPort | default 80 }}
+      protocol: {{ .protocol | default "TCP" }}
+      {{- if .nodePort }}
+      nodePort: {{ .nodePort }}
+      {{- end }}
+    {{- end }}
+  {{- end }}
+---
+{{- if .endpoints }}
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: {{ (.name | default (printf "svc-%s" $app)) | trunc $svcNameMax | trimSuffix "-" }}
+  {{- if .namespace }}
+  namespace: {{ .namespace }}
+  {{- end }}
+subsets:
+  - addresses:
+      {{- range .endpoints.addresses }}
+      - ip: {{ .ip }}
+      {{- end }}
+    {{- if .ports }}
+    ports:
+      {{- range .ports }}
+      - port: {{ .port }}
+      {{- end }}
+    {{- end }}
+---
+{{- end }}
+{{- end }}
