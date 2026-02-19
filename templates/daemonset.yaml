@@ -192,6 +192,10 @@ spec:
                 secretKeyRef:
                   name: {{ .valueFrom.secretKeyRef.name }}
                   key: {{ .valueFrom.secretKeyRef.key }}
+                {{- else if .valueFrom.configMapKeyRef }}
+                configMapKeyRef:
+                  name: {{ .valueFrom.configMapKeyRef.name }}
+                  key: {{ .valueFrom.configMapKeyRef.key }}
                 {{- else if .valueFrom.fieldRef }}
                 fieldRef:
                   fieldPath: {{ .valueFrom.fieldRef.fieldPath | quote }}
