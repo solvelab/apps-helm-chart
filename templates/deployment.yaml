@@ -164,7 +164,13 @@ spec:
                   - key: {{ $key }}
                     operator: In
                     values:
+                      {{- if kindIs "slice" $value }}
+                        {{- range $value }}
+                      - {{ . }}
+                        {{- end }}
+                      {{- else }}
                       - {{ $value }}
+                      {{- end }}
                     {{- end }}
                   {{- end }}
         {{- end }}
