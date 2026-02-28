@@ -1,0 +1,19 @@
+{{- range .Values.pv }}
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: {{ printf "pv-%s" .name }}
+spec:
+  capacity:
+    storage: {{ .storage }}
+  accessModes:
+    {{- range .accessModes }}
+    - {{ . }}
+    {{- end }}
+  {{- if .nfs }}
+  nfs:
+    path: {{ .nfs.path }}
+    server: {{ .nfs.server }}
+  {{- end }}
+---
+{{- end }}
